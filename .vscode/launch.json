@@ -1,0 +1,19 @@
+{
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"name": "Debug AutoStack",
+			"type": "coreclr",
+			"request": "launch",
+			"preLaunchTask": "build",
+			"program": "${workspaceFolder}/bin/Debug/net9.0/ImmichTools.dll",
+			"args": [
+				"autostack",
+			],
+			"cwd": "${workspaceFolder}",
+			"stopAtEntry": false,
+			"console": "integratedTerminal",
+			"internalConsoleOptions": "neverOpen",
+		}
+	]
+}
