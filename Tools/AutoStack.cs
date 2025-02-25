@@ -1,7 +1,7 @@
-﻿using ImmichTools.ReplyData;
+﻿using ImmichTools.Json;
+using ImmichTools.ReplyData;
 using ImmichTools.RequestData;
 using System.Net.Http.Json;
-using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Web;
 
@@ -9,11 +9,6 @@ namespace ImmichTools.Tools;
 
 internal class AutoStack
 {
-    private static readonly JsonSerializerOptions JsonSerializerOptions = new JsonSerializerOptions
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-    };
-
     private static HttpClient CreateHttpClient(string host, string apiKey)
     {
         var client = new HttpClient();
@@ -29,7 +24,9 @@ internal class AutoStack
             ? GetDirectoriesRecursive(directory, localDirectory ?? directory)
             : [ directory ];
 
-        var assetTasks = directories.Select(d => client.GetFromJsonAsync<Asset[]>("/api/view/folder?path=" + HttpUtility.UrlEncode(d)));
+        var assetTasks = directories.Select(d => client.GetFromJsonAsync<Asset[]>(
+            "/api/view/folder?path=" + HttpUtility.UrlEncode(d),
+            SerializerContext.Default.AssetArray));
         var assetArrays = await Task.WhenAll(assetTasks);
         var assets = assetArrays.SelectMany(a => a ?? []).ToArray();
 
@@ -52,7 +49,7 @@ internal class AutoStack
             await client.PostAsJsonAsync(
                 "/api/stacks",
                 new CreateStack { AssetIds = sortedAssets.Select(a => a.Id).ToList() },
-                JsonSerializerOptions);
+                SerializerContext.Default.CreateStack);
 
             if (copyMetadata)
             {
@@ -70,7 +67,7 @@ internal class AutoStack
                                 Latitude = rawImageAsset.ExifInfo.Latitude,
                                 Longitude = rawImageAsset.ExifInfo.Longitude
                             },
-                            JsonSerializerOptions);
+                            SerializerContext.Default.UpdateAsset);
                     }
                 }
             }
