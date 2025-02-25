@@ -17,11 +17,11 @@ internal class AutoStack
         return client;
     }
 
-    internal static async Task RunAsync(string host, string apiKey, string directory, bool recursive, string? localDirectory, bool copyMetadata)
+    internal static async Task RunAsync(string host, string apiKey, string directory, bool recursive, bool copyMetadata)
     {
         var client = CreateHttpClient(host, apiKey);
         var directories = recursive
-            ? GetDirectoriesRecursive(directory, localDirectory ?? directory)
+            ? await GetDirectoriesRecursiveAsync(directory, client)
             : [ directory ];
 
         var assetTasks = directories.Select(d => client.GetFromJsonAsync<Asset[]>(
@@ -75,24 +75,14 @@ internal class AutoStack
         }
     }
 
-    private static IEnumerable<string> GetDirectoriesRecursive(string serverDirectory, string localDirectory)
+    private static async Task<IEnumerable<string>> GetDirectoriesRecursiveAsync(string directory, HttpClient client)
     {
-        if(!Directory.Exists(localDirectory))
+        IEnumerable<string> directories = await client.GetFromJsonAsync("/api/view/folder/unique-paths", SerializerContext.Default.StringArray) ?? [ directory ];
+        if (directory.StartsWith("/"))
         {
-            yield break;
+            directories = directories.Select(d => d.StartsWith("/") ? d : "/" + d);
         }
-
-        yield return serverDirectory;
-
-        foreach(var subDirectory in Directory.EnumerateDirectories(localDirectory))
-        {
-            var serverSubDirectory = Path.Combine(serverDirectory, Path.GetFileName(subDirectory))
-                .Replace(Path.DirectorySeparatorChar, '/');
-            foreach(var subSubDirectory in GetDirectoriesRecursive(serverSubDirectory, subDirectory))
-            {
-                yield return subSubDirectory;
-            }
-        }
+        return directories.Where(d => !Path.GetRelativePath(directory, d).StartsWith(".."));
     }
 
     private static readonly HashSet<string> RawExtensions = [".cr2", ".cr3", ".dng"];

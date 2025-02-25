@@ -10,6 +10,7 @@ namespace ImmichTools.Json;
 [JsonSerializable(typeof(ReplyData.Asset))]
 [JsonSerializable(typeof(ReplyData.Asset[]))]
 [JsonSerializable(typeof(ReplyData.ExifInfo))]
+[JsonSerializable(typeof(string[]))]
 internal partial class SerializerContext : JsonSerializerContext
 {
 }

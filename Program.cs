@@ -19,13 +19,10 @@ autoStackCommand.AddArgument(directoryArgument);
 var recursiveOption = new Option<bool>("-r", "Recursively include subdirectories");
 autoStackCommand.AddOption(recursiveOption);
 
-var localDirectoryOption = new Option<string?>("-l", "Local directory that matches the remote directory");
-autoStackCommand.AddOption(localDirectoryOption);
-
 var copyMetadataOption = new Option<bool>("-m", "Copy metadata from raw image to edited versions");
 autoStackCommand.AddOption(copyMetadataOption);
 
-autoStackCommand.SetHandler(AutoStack.RunAsync, hostOption, apiKeyOption, directoryArgument, recursiveOption, localDirectoryOption, copyMetadataOption);
+autoStackCommand.SetHandler(AutoStack.RunAsync, hostOption, apiKeyOption, directoryArgument, recursiveOption, copyMetadataOption);
 rootCommand.AddCommand(autoStackCommand);
 
 await rootCommand.InvokeAsync(args);
