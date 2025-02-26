@@ -6,6 +6,7 @@
 			"task": "build",
 			"group": {
 				"kind": "build",
+				"isDefault": true
 			},
 			"label": "build"
 		}

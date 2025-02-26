@@ -2,13 +2,33 @@
 using ImmichTools.ReplyData;
 using ImmichTools.RequestData;
 using System.Net.Http.Json;
+using System.Text.Json.Serialization.Metadata;
 using System.Text.RegularExpressions;
 using System.Web;
 
 namespace ImmichTools.Tools;
 
+// TODO Use Polly for resilience
+
 internal class AutoStack
 {
+
+	private static readonly SemaphoreSlim _semaphore = new(5); // Adjust concurrency limit
+
+	private static async Task<T?> GetWithThrottle<T>(HttpClient client, string url, JsonTypeInfo<T> context)
+	{
+		await _semaphore.WaitAsync();
+		try
+		{
+			Console.Write(".");
+			return await GetWithRetry<T>(client, url, context);
+		}
+		finally
+		{
+			_semaphore.Release();
+		}
+	}
+
 	private static HttpClient CreateHttpClient(string host, string apiKey)
 	{
 		var client = new HttpClient();
@@ -24,14 +44,33 @@ internal class AutoStack
 				? await GetDirectoriesRecursiveAsync(directory, client)
 				: [directory];
 
-		var assetTasks = directories.Select(d => client.GetFromJsonAsync<Asset[]>(
-				"/api/view/folder?path=" + HttpUtility.UrlEncode(d),
-				SerializerContext.Default.AssetArray));
+		// var assetTasks = directories.Select(d => client.GetFromJsonAsync<Asset[]>(
+		// 		"/api/view/folder?path=" + HttpUtility.UrlEncode(d),
+		// 		SerializerContext.Default.AssetArray));
+		var assetTasks = directories.Select(d => GetWithThrottle<Asset[]>(
+				client, "/api/view/folder?path=" + HttpUtility.UrlEncode(d), SerializerContext.Default.AssetArray));
 		var assetArrays = await Task.WhenAll(assetTasks);
 		var assets = assetArrays.SelectMany(a => a ?? []).ToArray();
 
+		Console.WriteLine("");
 		if (assets == null || assets.Length == 0)
 		{
+			Console.WriteLine("❌ No assets found in {0}", directory);
+			return;
+		}
+
+		// var assetDetailTasks = assets.Select(a => client.GetFromJsonAsync<AssetDetail>(
+		// 		"/api/assets/" + HttpUtility.UrlEncode(a.Id),
+		// 		SerializerContext.Default.AssetDetail));
+		var assetDetailTasks = assets.Select(a => GetWithThrottle<AssetDetail>(
+				client, "/api/assets/" + HttpUtility.UrlEncode(a.Id), SerializerContext.Default.AssetDetail));
+		var assetDetailArrays = await Task.WhenAll(assetDetailTasks);
+		var assetDetails = assetDetailArrays.Where(a => a != null && a.Stack == null).Select(a => a!).ToArray();
+
+		Console.WriteLine("");
+		if (assetDetails == null || assetDetails.Length == 0)
+		{
+			Console.WriteLine("❌ No un-stacked assets found in {0}", directory);
 			return;
 		}
 
@@ -40,10 +79,15 @@ internal class AutoStack
 			Console.WriteLine("⭐⭐⭐ DRY RUN CHANGES ⭐⭐⭐");
 		}
 
-		// TODO Check for existing stacks
-
-		var groupedAssets = assets.GroupBy(GetBaseName).Where(g => g.Count() > 1).ToArray();
+		var groupedAssets = assetDetails.GroupBy<Asset, string>(GetBaseName).Where(g => g.Count() > 1).ToArray();
 		var stackCount = groupedAssets.Length;
+
+		if (stackCount == 0)
+		{
+			Console.WriteLine("❌ No stackable assets found in {0}", directory);
+			return;
+		}
+
 		var i = 1;
 		foreach (var group in groupedAssets)
 		{
@@ -56,7 +100,7 @@ internal class AutoStack
 
 			if (!dryRun)
 			{
-				await client.PostAsJsonAsync(
+				await PostWithRetry(client,
 						"/api/stacks",
 						new CreateStack { AssetIds = sortedAssets.Select(a => a.Id).ToList() },
 						SerializerContext.Default.CreateStack);
@@ -93,7 +137,7 @@ internal class AutoStack
 
 	private static async Task<IEnumerable<string>> GetDirectoriesRecursiveAsync(string directory, HttpClient client)
 	{
-		IEnumerable<string> directories = await client.GetFromJsonAsync("/api/view/folder/unique-paths", SerializerContext.Default.StringArray) ?? [directory];
+		IEnumerable<string> directories = await GetWithRetry(client, "/api/view/folder/unique-paths", SerializerContext.Default.StringArray) ?? [directory];
 		if (directory.StartsWith("/"))
 		{
 			directories = directories.Select(d => d.StartsWith("/") ? d : "/" + d);
@@ -118,5 +162,42 @@ internal class AutoStack
 		var withoutExtension = Path.GetFileNameWithoutExtension(asset.OriginalFileName);
 		var match = BaseNameRegex.Match(withoutExtension);
 		return match.Success ? match.Groups["BaseName"].Value : withoutExtension;
+	}
+
+	private static async Task<T?> GetWithRetry<T>(HttpClient client, string url, JsonTypeInfo<T> context, int maxRetries = 3)
+	{
+		int attempt = 0;
+		while (true)
+		{
+			try
+			{
+				return await client.GetFromJsonAsync<T>(url, context);
+			}
+			catch (HttpRequestException ex) when (attempt < maxRetries)
+			{
+				int delay = (int)Math.Pow(2, attempt) * 100; // 100ms, 200ms, 400ms...
+				Console.WriteLine($"Request failed: {ex.Message}. Retrying in {delay}ms...");
+				await Task.Delay(delay);
+				attempt++;
+			}
+		}
+	}
+	private static async Task<HttpResponseMessage> PostWithRetry<T>(HttpClient client, string url, T payload, JsonTypeInfo<T> context, int maxRetries = 3)
+	{
+		int attempt = 0;
+		while (true)
+		{
+			try
+			{
+				return await client.PostAsJsonAsync(url, payload, context);
+			}
+			catch (HttpRequestException ex) when (attempt < maxRetries)
+			{
+				int delay = (int)Math.Pow(2, attempt) * 100;
+				Console.WriteLine($"POST failed: {ex.Message}. Retrying in {delay}ms...");
+				await Task.Delay(delay);
+				attempt++;
+			}
+		}
 	}
 }
